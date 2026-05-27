@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="zh-CN"><head><script data-od-sandbox-shim="">(function(){
+  function makeStore(){
+    var data = {};
+    var api = {
+      getItem: function(k){ return Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null; },
+      setItem: function(k, v){ data[k] = String(v); },
+      removeItem: function(k){ delete data[k]; },
+      clear: function(){ data = {}; },
+      key: function(i){ return Object.keys(data)[i] || null; }
+    };
+    Object.defineProperty(api, 'length', { get: function(){ return Object.keys(data).length; } });
+    return api;
+  }
+  function tryShim(name){
+    var works = false;
+    try { works = !!window[name] && typeof window[name].getItem === 'function'; void window[name].length; }
+    catch (_) { works = false; }
+    if (works) return;
+    try { Object.defineProperty(window, name, { configurable: true, value: makeStore() }); }
+    catch (_) { try { window[name] = makeStore(); } catch (__) {} }
+  }
+  tryShim('localStorage');
+  tryShim('sessionStorage');
+  document.addEventListener('click', (e) => {
+    if (!e.target || !(e.target instanceof Element)) return;
+    var link = e.target.closest('a[href]');
+    if (!link) return;
+    var href = link.getAttribute('href');
+    if (href === null) return;
+    var isAnchor = href.startsWith('#') || href === '';
+    if (isAnchor) {
+      e.preventDefault();
+      if (href === '' || href === '#') {
+        window.scrollTo({ top: 0 });
+        history.replaceState(null, '', ' ');
+      } else {
+        var targetId = href.slice(1);
+        var target = targetId ? document.getElementById(targetId) : null;
+        if (target) {
+          target.scrollIntoView();
+          location.hash === href && history.replaceState(null, '', ' ');
+          location.hash = href;
+        }
+      }
+    } else if (link.getAttribute('target') === '_blank') {
+      e.preventDefault();
+      let safe = false;
+      try {
+        var url = new URL(href, location.href);
+        safe =
+          url.protocol === 'http:' ||
+          url.protocol === 'https:' ||
+          url.protocol === 'mailto:';
+      } catch (_) {}
+      safe && window.open(href, '_blank', 'noopener,noreferrer');
+    }
+  });
+})();</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>积分监控（配额拆分）</title>
+  <style>
+    :root{
+      --bg:#f5f5f7;
+      --surface:#ffffff;
+      --ink:#1d1d1f;
+      --muted:#6e6e73;
+      --line:#d2d2d7;
+      --blue:#0071e3;
+      --blue-hi:#2997ff;
+      --font-display:"SF Pro Display","Helvetica Neue",Helvetica,Arial,sans-serif;
+      --font-body:"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      padding:20px;
+      background:var(--bg);
+      color:var(--ink);
+      font-family:var(--font-body);
+    }
+    .wrap{max-width:1040px;margin:0 auto;display:grid;gap:14px}
+    .card{
+      background:var(--surface);
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:16px;
+    }
+    .top{
+      display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;
+    }
+    h1{
+      margin:0;
+      font-family:var(--font-display);
+      font-size:24px;
+      letter-spacing:-.3px;
+    }
+    .muted{color:var(--muted);font-size:13px;margin-top:4px}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    select,input{
+      border:1px solid var(--line);
+      border-radius:10px;
+      padding:9px 10px;
+      min-height:38px;
+      font-size:14px;
+      background:#fff;
+      color:var(--ink);
+    }
+    input{min-width:220px}
+    button{
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:9px 14px;
+      background:#fff;
+      font-size:13px;
+      font-weight:600;
+      cursor:pointer;
+    }
+    .primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:12px;
+    }
+    .metric{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:14px;
+    }
+    .label{font-size:13px;color:var(--muted);margin-bottom:8px}
+    .value{
+      margin:0;
+      font-family:var(--font-display);
+      font-size:30px;
+      line-height:1.08;
+      letter-spacing:-.4px;
+      font-variant-numeric:tabular-nums;
+    }
+
+    .quota-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
+    .quota{
+      border:1px solid var(--line);
+      border-radius:14px;
+      padding:14px;
+    }
+    .quota h3{
+      margin:0 0 10px;
+      font-size:15px;
+      font-weight:600;
+      letter-spacing:-.1px;
+    }
+    .mini{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:8px;
+      font-size:13px;
+      color:var(--muted);
+      margin-bottom:8px;
+    }
+    .mono{font-variant-numeric:tabular-nums}
+    .track{
+      width:100%;
+      height:12px;
+      background:#eceef3;
+      border:1px solid #e3e6ed;
+      border-radius:999px;
+      overflow:hidden;
+    }
+    .fill{
+      height:100%;
+      width:0;
+      background:linear-gradient(90deg,var(--blue),var(--blue-hi));
+      transition:width .25s ease;
+    }
+    .note{margin-top:8px;font-size:12px;color:var(--muted)}
+
+    @media (max-width:900px){
+      .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .quota-grid{grid-template-columns:1fr}
+    }
+    @media (max-width:560px){
+      body{padding:12px}
+      .grid{grid-template-columns:1fr}
+    }
+  </style>
+<style data-od-tweaks-bridge-style="">
+[data-od-tweaks-hidden] .tw-panel {
+  transform: translateX(calc(100% + 32px)) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.tw-restore { display: none !important; }
+</style><script data-od-tweaks-bridge="">(function(){
+  // Synchronously hide BEFORE the artifact body parses so the panel never
+  // flashes on initial paint. The host removes the attribute via postMessage
+  // once it knows the desired state.
+  document.documentElement.setAttribute('data-od-tweaks-hidden', '');
+
+  var suppressEcho = false;
+  var observer = null;
+
+  function panelEl(){ return document.querySelector('.tw-panel'); }
+
+  function applyClassesToPanel(visible){
+    var panel = panelEl();
+    if (panel) panel.classList.toggle('tw-hidden', !visible);
+  }
+
+  function setPanelVisible(visible){
+    suppressEcho = true;
+    document.documentElement.toggleAttribute('data-od-tweaks-hidden', !visible);
+    applyClassesToPanel(visible);
+    // Clear flag after the MutationObserver has had a chance to fire for this
+    // change so we don't echo our own host-driven toggles back to the host.
+    Promise.resolve().then(function(){ suppressEcho = false; });
+  }
+
+  function postState(){
+    var panel = panelEl();
+    if (!panel) return;
+    try {
+      parent.postMessage({
+        type: 'od:tweaks-panel-state',
+        visible: !panel.classList.contains('tw-hidden'),
+      }, '*');
+    } catch (e) {}
+  }
+
+  function postAvailability(){
+    try {
+      parent.postMessage({
+        type: 'od:tweaks-available',
+        available: !!panelEl(),
+      }, '*');
+    } catch (e) {}
+  }
+
+  function attachObserver(){
+    var panel = panelEl();
+    if (!panel || observer) return;
+    observer = new MutationObserver(function(){
+      if (suppressEcho) return;
+      postState();
+    });
+    observer.observe(panel, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  function onReady(){
+    // Capture the panel authored visibility BEFORE we apply the host hidden
+    // attribute. The bridge sets data-od-tweaks-hidden synchronously in head
+    // (before the body parses), so on entry to onReady the attribute is
+    // always present even though the artifact may have authored the panel
+    // as default-visible. Reading the panel class first is the only place
+    // we can still observe the author intent. Then drive the attribute,
+    // classes, and posted state from that captured value so a default
+    // visible tw-panel reports visible:true and the toolbar toggle starts
+    // ON. Issue surfaced in PR #1643 review.
+    var panel = panelEl();
+    var initialVisible = !!panel && !panel.classList.contains('tw-hidden');
+    document.documentElement.toggleAttribute('data-od-tweaks-hidden', !initialVisible);
+    applyClassesToPanel(initialVisible);
+    attachObserver();
+    postAvailability();
+    // Post the captured initial visibility so the toolbar toggle reflects
+    // the default state on mount. Without this the toggle reads OFF while
+    // a default-visible tw-panel artifact clearly shows its panel and the
+    // user would have to click toggle-on then toggle-off to actually hide.
+    postState();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+  } else {
+    onReady();
+  }
+
+  window.addEventListener('message', function(ev){
+    if (!ev.data || ev.data.type !== 'od:tweaks-panel-visible') return;
+    setPanelVisible(!!ev.data.visible);
+  });
+})();</script></head>
+<body>
+<div class="wrap" data-od-id="path-0">
+  <section class="card top" data-od-id="path-0-0">
+    <div>
+      <h1 data-od-id="path-0-0-0-0">积分监控</h1>
+      <div class="muted">多账号切换 + 月度/补偿配额单独展示</div>
+    </div>
+    <div class="row" data-od-id="path-0-0-1">
+      <select id="accountSelect" aria-label="账号切换" data-od-id="path-0-0-1-0"></select>
+      <input id="newAccount" placeholder="新账号名称（如：主账号-上海）" data-od-id="path-0-0-1-1">
+      <button class="primary" id="addBtn" data-od-id="path-0-0-1-2">添加账号</button>
+    </div>
+  </section>
+
+  <section class="card" data-od-id="path-0-1">
+    <div class="grid" data-od-id="path-0-1-0">
+      <div class="metric">
+        <div class="label">月度积分（used）</div>
+        <p class="value mono" id="monthlyUsed" data-od-id="path-0-1-0-0-1">0</p>
+      </div>
+      <div class="metric">
+        <div class="label">补偿积分（used）</div>
+        <p class="value mono" id="compUsed" data-od-id="path-0-1-0-1-1">0</p>
+      </div>
+      <div class="metric">
+        <div class="label">使用百分比（总）</div>
+        <p class="value mono" id="totalPercent" data-od-id="path-0-1-0-2-1">0%</p>
+      </div>
+      <div class="metric">
+        <div class="label">总量（limit）</div>
+        <p class="value mono" id="totalLimit" data-od-id="path-0-1-0-3-1">0</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" data-od-id="path-0-2">
+    <div class="quota-grid" data-od-id="path-0-2-0">
+      <div class="quota">
+        <h3 data-od-id="path-0-2-0-0-0">月度配额（plan_total_token）</h3>
+        <div class="mini"><span>已用 / 上限</span><span class="mono" id="planText" data-od-id="path-0-2-0-0-1-1">0 / 0</span></div>
+        <div class="track"><div class="fill" id="planFill" data-od-id="path-0-2-0-0-2-0"></div></div>
+        <div class="note" id="planPct" data-od-id="path-0-2-0-0-3">使用率 0%</div>
+      </div>
+
+      <div class="quota">
+        <h3 data-od-id="path-0-2-0-1-0">补偿配额（compensation_total_token）</h3>
+        <div class="mini"><span>已用 / 上限</span><span class="mono" id="compText" data-od-id="path-0-2-0-1-1-1">0 / 0</span></div>
+        <div class="track"><div class="fill" id="compFill" data-od-id="path-0-2-0-1-2-0"></div></div>
+        <div class="note" id="compPct" data-od-id="path-0-2-0-1-3">使用率 0%</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  const STORAGE_KEY = "simple_points_accounts_v2";
+
+  // 你的返回结构：[{name, used, limit, percent}, ...]
+  const seedApiPayload = [
+    { "name": "plan_total_token", "used": 0, "limit": 38000000000, "percent": 0 },
+    { "name": "compensation_total_token", "used": 924941460, "limit": 7333506494, "percent": 0.13 }
+  ];
+
+  // 每个账号保存一份 payload
+  let accounts = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null") || [
+    { id: crypto.randomUUID(), name: "默认账号", payload: seedApiPayload },
+    { id: crypto.randomUUID(), name: "测试账号", payload: [
+      { "name": "plan_total_token", "used": 5800000000, "limit": 38000000000, "percent": 0.1526 },
+      { "name": "compensation_total_token", "used": 214941460, "limit": 7333506494, "percent": 0.0293 }
+    ] }
+  ];
+  let currentId = accounts[0]?.id || null;
+
+  const $ = id => document.getElementById(id);
+  const accountSelect = $("accountSelect");
+  const newAccount = $("newAccount");
+
+  function save(){
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(accounts));
+  }
+
+  function fmt(n){
+    return Number(n || 0).toLocaleString("zh-CN");
+  }
+
+  function percentOf(used, limit, rawPercent){
+    if (typeof rawPercent === "number" && rawPercent > 0) return rawPercent * 100;
+    if (!limit) return 0;
+    return (used / limit) * 100;
+  }
+
+  function getCurrent(){
+    return accounts.find(a => a.id === currentId);
+  }
+
+  function extract(payload){
+    const plan = payload.find(x => x.name === "plan_total_token") || {used:0,limit:0,percent:0};
+    const comp = payload.find(x => x.name === "compensation_total_token") || {used:0,limit:0,percent:0};
+    return { plan, comp };
+  }
+
+  function renderSelect(){
+    accountSelect.innerHTML = accounts.map(a => `<option value="${a.id}">${a.name}</option>`).join("");
+    accountSelect.value = currentId;
+  }
+
+  function render(){
+    const cur = getCurrent();
+    if (!cur) return;
+
+    const { plan, comp } = extract(cur.payload);
+
+    const planPct = percentOf(plan.used, plan.limit, plan.percent);
+    const compPct = percentOf(comp.used, comp.limit, comp.percent);
+
+    const totalUsed = Number(plan.used || 0) + Number(comp.used || 0);
+    const totalLimit = Number(plan.limit || 0) + Number(comp.limit || 0);
+    const totalPct = totalLimit ? (totalUsed / totalLimit) * 100 : 0;
+
+    $("monthlyUsed").textContent = fmt(plan.used);
+    $("compUsed").textContent = fmt(comp.used);
+    $("totalPercent").textContent = totalPct.toFixed(2) + "%";
+    $("totalLimit").textContent = fmt(totalLimit);
+
+    $("planText").textContent = `${fmt(plan.used)} / ${fmt(plan.limit)}`;
+    $("planFill").style.width = Math.min(planPct, 100).toFixed(2) + "%";
+    $("planPct").textContent = `使用率 ${planPct.toFixed(2)}%`;
+
+    $("compText").textContent = `${fmt(comp.used)} / ${fmt(comp.limit)}`;
+    $("compFill").style.width = Math.min(compPct, 100).toFixed(2) + "%";
+    $("compPct").textContent = `使用率 ${compPct.toFixed(2)}%`;
+  }
+
+  $("addBtn").addEventListener("click", () => {
+    const name = newAccount.value.trim();
+    if (!name) return;
+    const item = {
+      id: crypto.randomUUID(),
+      name,
+      payload: [
+        { "name": "plan_total_token", "used": 0, "limit": 38000000000, "percent": 0 },
+        { "name": "compensation_total_token", "used": 0, "limit": 7333506494, "percent": 0 }
+      ]
+    };
+    accounts.push(item);
+    currentId = item.id;
+    newAccount.value = "";
+    save();
+    renderSelect();
+    render();
+  });
+
+  accountSelect.addEventListener("change", () => {
+    currentId = accountSelect.value;
+    render();
+  });
+
+  // 如果你后续接接口，可直接调用这个函数刷新当前账号数据
+  // updateCurrentPayload(apiData)
+  function updateCurrentPayload(apiData){
+    const idx = accounts.findIndex(a => a.id === currentId);
+    if (idx === -1) return;
+    accounts[idx].payload = apiData;
+    save();
+    render();
+  }
+  window.updateCurrentPayload = updateCurrentPayload;
+
+  renderSelect();
+  render();
+  save();
+</script>
+
+
+<script data-od-snapshot-bridge="">(function(){
+  function copyComputedStyle(source, target){
+    if (!source || !target || source.nodeType !== 1 || target.nodeType !== 1) return;
+    var computed = window.getComputedStyle(source);
+    var style = target.getAttribute('style') || '';
+    for (var i = 0; i < computed.length; i++){
+      var prop = computed[i];
+      style += prop + ':' + computed.getPropertyValue(prop) + ';';
+    }
+    target.setAttribute('style', style);
+  }
+  function syncElementState(source, target){
+    var tag = source.tagName ? source.tagName.toLowerCase() : '';
+    if (tag === 'img' && source.currentSrc) target.setAttribute('src', source.currentSrc);
+    if (tag === 'input' || tag === 'textarea') target.setAttribute('value', source.value || '');
+    if (tag === 'canvas') {
+      try {
+        var img = document.createElement('img');
+        img.setAttribute('src', source.toDataURL('image/png'));
+        img.setAttribute('style', target.getAttribute('style') || '');
+        target.parentNode && target.parentNode.replaceChild(img, target);
+      } catch (_) {}
+    }
+  }
+  function inlineSnapshotStyles(originalRoot, cloneRoot){
+    copyComputedStyle(originalRoot, cloneRoot);
+    syncElementState(originalRoot, cloneRoot);
+    var originals = originalRoot.querySelectorAll('*');
+    var clones = cloneRoot.querySelectorAll('*');
+    var count = Math.min(originals.length, clones.length);
+    for (var i = 0; i < count; i++){
+      copyComputedStyle(originals[i], clones[i]);
+      syncElementState(originals[i], clones[i]);
+    }
+    var scripts = cloneRoot.querySelectorAll('script');
+    for (var s = scripts.length - 1; s >= 0; s--) scripts[s].remove();
+  }
+  function waitForImages(){
+    var imgs = Array.prototype.slice.call(document.images || []);
+    return Promise.all(imgs.map(function(img){
+      if (img.complete) return Promise.resolve();
+      return new Promise(function(resolve){
+        img.addEventListener('load', resolve, { once: true });
+        img.addEventListener('error', resolve, { once: true });
+      });
+    }));
+  }
+  function renderSnapshot(id){
+    var w = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    var h = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    var dpr = window.devicePixelRatio || 1;
+    var docW = Math.max(w, document.documentElement.scrollWidth || 0, document.body ? document.body.scrollWidth : 0);
+    var docH = Math.max(h, document.documentElement.scrollHeight || 0, document.body ? document.body.scrollHeight : 0);
+    var clone = document.documentElement.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+    inlineSnapshotStyles(document.documentElement, clone);
+    var serializer = new XMLSerializer();
+    var html = serializer.serializeToString(clone);
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">' +
+      '<foreignObject x="' + (-window.scrollX || 0) + '" y="' + (-window.scrollY || 0) + '" width="' + docW + '" height="' + docH + '">' +
+      html +
+      '</foreignObject></svg>';
+    var img = new Image();
+    img.onload = function(){
+      try {
+        var canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.floor(w * dpr));
+        canvas.height = Math.max(1, Math.floor(h * dpr));
+        var ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('no 2d context');
+        ctx.scale(dpr, dpr);
+        ctx.drawImage(img, 0, 0, w, h);
+        window.parent.postMessage({ type: 'od:snapshot:result', id: id, dataUrl: canvas.toDataURL('image/png'), w: canvas.width, h: canvas.height }, '*');
+      } catch (err) {
+        window.parent.postMessage({ type: 'od:snapshot:result', id: id, error: String(err && err.message || err) }, '*');
+      }
+    };
+    img.onerror = function(){
+      window.parent.postMessage({ type: 'od:snapshot:result', id: id, error: 'snapshot image failed' }, '*');
+    };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  }
+  window.addEventListener('message', function(ev){
+    var data = ev && ev.data;
+    if (!data || data.type !== 'od:snapshot' || !data.id) return;
+    waitForImages().then(function(){ renderSnapshot(String(data.id)); });
+  });
+})();</script><script data-od-srcdoc-transport-activation="">(function(){
+  window.addEventListener('message', function(ev){
+    var data = ev && ev.data;
+    if (!data || data.type !== 'od:srcdoc-transport-activate' || typeof data.html !== 'string') return;
+    document.open();
+    document.write(data.html);
+    document.close();
+  });
+})();</script></body></html>

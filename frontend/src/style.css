@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+body {
+  @apply m-0 bg-neutral-100 text-neutral-900;
+  font-family: "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
