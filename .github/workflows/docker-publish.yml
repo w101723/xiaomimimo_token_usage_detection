@@ -36,8 +36,8 @@ jobs:
         with:
           images: ghcr.io/w101723/xiaomimimo_token_usage_detection
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-
+            type=raw,value=latest
+            type=sha,format=short,prefix=sha-
 
       - name: Build and push multi-arch image
         uses: docker/build-push-action@v6
