@@ -115,23 +115,6 @@ docker run --rm -p 8000:8000 \
 
 ---
 
-## GitHub Actions 自动发布镜像
-
-工作流文件：`.github/workflows/docker-publish.yml`
-
-触发条件：
-
-- push 到 `main`
-- 手动触发（`workflow_dispatch`）
-
-发布目标：
-
-- GHCR：`ghcr.io/w101723/xiaomimimo_token_usage_detection`
-- 平台：`linux/amd64`, `linux/arm64`
-- 标签：`latest`（默认分支）和 `sha-<commit>`
-
----
-
 ## 常用命令
 
 ```bash
